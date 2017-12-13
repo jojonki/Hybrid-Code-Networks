@@ -4,17 +4,17 @@ from gensim.models.keyedvectors import KeyedVectors
 import torch
 import torch.nn.functional as F
 
-from utils import get_entities, load_data, make_word_vector, to_var
+from utils import save_pickle, load_pickle, load_embd_weights, get_entities, load_data, make_word_vector, to_var
 from models import HybridCodeNetwork
 
-# model_path = './data/GoogleNews-vectors-negative300.bin'
-# word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
-# model.wv['computer']
+embd_size = 300
+hidden_size = 100
+
 
 entities = get_entities('dialog-bAbI-tasks/dialog-babi-kb-all.txt')
 
 for idx, (ent_name, ent_vals) in enumerate(entities.items()):
-    print(idx, ent_name, ent_vals[0] )
+    print('entities', idx, ent_name, ent_vals[0] )
 
 # create training dataset
 SILENT = '<SILENT>'
@@ -34,18 +34,23 @@ print('max turn:', max_turn)
 w2i = dict((w, i) for i, w in enumerate(vocab))
 i2w = dict((i, w) for i, w in enumerate(vocab))
 act2i = dict((act, i) for i, act in enumerate(system_acts))
-
-
-embd_size = 300
-hidden_size = 100
 print('action_size:', len(system_acts))
-model = HybridCodeNetwork(len(vocab), embd_size, hidden_size, len(system_acts))
+
+print('loading a word2vec binary...')
+model_path = './data/GoogleNews-vectors-negative300.bin'
+word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
+print('done')
+pre_embd_w = load_embd_weights(word2vec, len(vocab), embd_size, w2i)
+save_pickle(pre_embd_w, 'pre_embd_w.pickle')
+pre_embd_w = load_pickle('pre_embd_w.pickle')
+
+model = HybridCodeNetwork(len(vocab), embd_size, hidden_size, len(system_acts), pre_embd_w)
 if torch.cuda.is_available():
     model.cuda()
-optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()))
+optimizer = torch.optim.Adadelta(filter(lambda p: p.requires_grad, model.parameters()))
 
 
-def train(model, data, optimizer, w2i, act2i, n_epochs=10, batch_size=64):
+def train(model, data, optimizer, w2i, act2i, n_epochs=30, batch_size=64):
     for epoch in range(n_epochs):
         print('Epoch', epoch)
         random.shuffle(data)
@@ -63,10 +68,8 @@ def train(model, data, optimizer, w2i, act2i, n_epochs=10, batch_size=64):
             for labels in batch_labels:
                 vec_labels = [act2i[l] for l in labels]
                 pad_len = dialog_maxlen - len(labels)
-#                 print('b vec_labels', len(vec_labels))
                 for _ in range(pad_len):
                     vec_labels.append(act2i[SILENT])
-#                 print('vec_labels', len(vec_labels))
                 labels_var.append(torch.LongTensor(vec_labels))
             labels_var = to_var(torch.stack(labels_var, 0))
             context = copy.deepcopy([d[2] for d in batch])
@@ -82,9 +85,11 @@ def train(model, data, optimizer, w2i, act2i, n_epochs=10, batch_size=64):
             loss = F.nll_loss(pred, labels_var)
             acc += torch.sum(labels_var == torch.max(pred, 1)[1]).data[0]
             total += labels_var.size(0)
+            # if i % (2 * batch_size) == 0:
             print('Acc: {:.3f}% ({}/{})'.format(100 * acc/total, acc, total))
             # print('loss', loss.data[0])
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
 train(model, train_data, optimizer, w2i, act2i)

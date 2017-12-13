@@ -1,9 +1,23 @@
 import re
 import copy
+import pickle
+import numpy as np
 import torch
 from torch.autograd import Variable
 
 SILENT = '<SILENT>' # TODO hard code
+
+
+def save_pickle(d, path):
+    print('save pickle to', path)
+    with open(path, mode='wb') as f:
+        pickle.dump(d, f)
+
+
+def load_pickle(path):
+    print('load', path)
+    with open(path, mode='rb') as f:
+        return pickle.load(f)
 
 
 def get_entities(fpath):
@@ -19,6 +33,19 @@ def get_entities(fpath):
             if slot_val not in entities[slot_type]:
                 entities[slot_type].append(slot_val)
     return entities
+
+
+def load_embd_weights(word2vec, vocab_size, embd_size, w2i):
+    embedding_matrix = np.zeros((vocab_size, embd_size))
+    print('embed_matrix.shape', embedding_matrix.shape)
+    found_ct = 0
+    for word, idx in w2i.items():
+        # words not found in embedding index will be all-zeros.
+        if word in word2vec.wv:
+            embedding_matrix[idx] = word2vec.wv[word]
+            found_ct += 1
+    print(found_ct, 'words are found in word2vec. vocab_size is', vocab_size)
+    return torch.from_numpy(embedding_matrix).type(torch.FloatTensor)
 
 
 def load_data(fpath, entities, vocab, system_acts):
@@ -37,7 +64,7 @@ def load_data(fpath, entities, vocab, system_acts):
             else:
                 ls = l.split("\t")
                 t_u = ls[0].split(' ', 1)
-                turn = t_u[0]
+                # turn = t_u[0]
                 uttr = t_u[1].split(' ')
                 update_context(context, uttr, entities)
                 sys_act = SILENT
@@ -51,7 +78,7 @@ def load_data(fpath, entities, vocab, system_acts):
                     if sys_act not in system_acts: system_acts.append(sys_act)
                 else:
                     continue # TODO
-                        
+
                 x.append(uttr)
                 y.append(sys_act)
                 c.append(copy.copy((context)))

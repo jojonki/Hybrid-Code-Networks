@@ -12,6 +12,7 @@ class WordEmbedding(nn.Module):
         super(WordEmbedding, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embd_size)
         if pre_embd_w is not None:
+            print('pre embedding weight is set')
             self.embedding.weight = nn.Parameter(pre_embd_w, requires_grad=is_train_embd)
 
     def forward(self, x):
@@ -19,11 +20,11 @@ class WordEmbedding(nn.Module):
 
 
 class HybridCodeNetwork(nn.Module):
-    def __init__(self, vocab_size, embd_size, hidden_size, action_size):
+    def __init__(self, vocab_size, embd_size, hidden_size, action_size, pre_embd_w=None):
         super(HybridCodeNetwork, self).__init__()
         self.embd_size = embd_size
         self.hidden_size = hidden_size
-        self.embedding = WordEmbedding(vocab_size, embd_size)
+        self.embedding = WordEmbedding(vocab_size, embd_size, pre_embd_w)
         self.lstm = nn.LSTM(307, hidden_size, batch_first=True) # TODO input dim
         self.fc = nn.Linear(hidden_size, action_size)
 
