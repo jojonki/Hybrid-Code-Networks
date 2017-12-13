@@ -4,6 +4,9 @@ Hybrid Code Networks: practical and efficient end-to-end dialog control with sup
 Jason D. Williams, Kavosh Asadi, Geoffrey Zweig  
 https://arxiv.org/abs/1702.03274
 
+
+This repo contains the implementation of Hybrid Code Networks in PyTorch.
+
 ## Setup
 
 You need to download following data.
