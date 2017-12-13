@@ -25,11 +25,11 @@ class HybridCodeNetwork(nn.Module):
         self.embd_size = embd_size
         self.hidden_size = hidden_size
         self.embedding = WordEmbedding(vocab_size, embd_size, pre_embd_w)
-        self.lstm = nn.LSTM(307, hidden_size, batch_first=True) # TODO input dim
+        self.lstm = nn.LSTM(embd_size+vocab_size+4+1, hidden_size, batch_first=True) # 4 (context size) + 1 (Unknown)
         self.fc = nn.Linear(hidden_size, action_size)
 
 #     def forward(self, uttr, context, act_mask, bow, last_act):
-    def forward(self, uttr, context):
+    def forward(self, uttr, context, bow):
         # uttr: (bs, dialog_len, sentence_len)
         # uttr: (bs, dialog_len, context_dim)
         bs = uttr.size(0)
@@ -39,7 +39,7 @@ class HybridCodeNetwork(nn.Module):
         embd = self.embedding(uttr.view(bs, -1)) # (bs, dialog_len*sentence_len, embd)
         embd = embd.view(bs, dlg_len, sent_len, -1) # (bs, dialog_len, sentence_len, embd)
         embd = torch.mean(embd, 2) # (bs, dialog_len, embd)
-        x = torch.cat((embd, context), 2) # (bs, dialog_len, embd+context_dim)
+        x = torch.cat((embd, context, bow), 2) # (bs, dialog_len, embd+context_dim)
         x, (h, c) = self.lstm(x) # (bs, seq, hid), ((1, bs, hid), (1, bs, hid))
-        y = F.log_softmax(self.fc(x), -1) # (bs, seq, action_size)
+        y = F.log_softmax(self.fc(F.tanh(x)), -1) # (bs, seq, action_size)
         return y

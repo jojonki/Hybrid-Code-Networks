@@ -6,6 +6,7 @@ import torch
 from torch.autograd import Variable
 
 SILENT = '<SILENT>' # TODO hard code
+UNK = '<UNK>'
 
 
 def save_pickle(d, path):
@@ -21,17 +22,19 @@ def load_pickle(path):
 
 
 def get_entities(fpath):
-    entities = {}
+    # entities = {}
+    entities = {'R_cuisine': [], 'R_location': [], 'R_price': [], 'R_number': []}
     with open(fpath, 'r') as file:
         lines = file.readlines()
         for l in lines:
             wds = l.rstrip().split(' ')[2].split('\t')
             slot_type = wds[0] # ex) R_price
             slot_val = wds[1] # ex) cheap
-            if slot_type not in entities:
-                entities[slot_type] = []
-            if slot_val not in entities[slot_type]:
-                entities[slot_type].append(slot_val)
+            # if slot_type not in entities:
+            #     entities[slot_type] = []
+            if slot_type in entities:
+                if slot_val not in entities[slot_type]:
+                    entities[slot_type].append(slot_val)
     return entities
 
 
@@ -48,18 +51,36 @@ def load_embd_weights(word2vec, vocab_size, embd_size, w2i):
     return torch.from_numpy(embedding_matrix).type(torch.FloatTensor)
 
 
-def load_data(fpath, entities, vocab, system_acts):
+def load_vocab(fpath, vocab):
+    with open(fpath, 'r') as f:
+        lines = f.readlines()
+        for idx, l in enumerate(lines):
+            l = l.rstrip()
+            if l != '':
+                ls = l.split("\t")
+                t_u = ls[0].split(' ', 1)
+                # turn = t_u[0]
+                uttr = t_u[1].split(' ')
+                if len(ls) == 2: # includes user and system utterance
+                    for w in uttr:
+                        if w not in vocab:
+                            vocab.append(w)
+    vocab = sorted(vocab)
+    return vocab
+
+
+def load_data(fpath, entities, w2i, system_acts):
     data = []
     with open(fpath, 'r') as f:
         lines = f.readlines()
-        x, y, c = [], [], []
+        x, y, c, b = [], [], [], []
         context = [0] * len(entities.keys())
         for idx, l in enumerate(lines):
             l = l.rstrip()
             if l == '':
-                data.append((x, y, c))
+                data.append((x, y, c, b))
                 # reset
-                x, y, c = [], [], []
+                x, y, c, b = [], [], [], []
                 context = [0] * len(entities.keys())
             else:
                 ls = l.split("\t")
@@ -67,11 +88,9 @@ def load_data(fpath, entities, vocab, system_acts):
                 # turn = t_u[0]
                 uttr = t_u[1].split(' ')
                 update_context(context, uttr, entities)
+                bow = get_bow(uttr, w2i)
                 sys_act = SILENT
                 if len(ls) == 2: # includes user and system utterance
-                    for w in uttr:
-                        if w not in vocab: vocab.append(w)
-
                     sys_act = ls[1]
                     sys_act = re.sub(r'resto_\S+', '', sys_act)
                     if sys_act.startswith('api_call'): sys_act = 'api_call'
@@ -82,8 +101,8 @@ def load_data(fpath, entities, vocab, system_acts):
                 x.append(uttr)
                 y.append(sys_act)
                 c.append(copy.copy((context)))
-    vocab = sorted(vocab)
-    return data, vocab, system_acts
+                b.append(bow)
+    return data, system_acts
 
 
 def update_context(context, sentence, entities):
@@ -93,9 +112,9 @@ def update_context(context, sentence, entities):
                 context[idx] = 1
 
 
-def get_bow(sentence, vocab, w2i):
-    bow = [0] * len(vocab)
-    for word in sentence.split(' '):
+def get_bow(sentence, w2i):
+    bow = [0] * len(w2i)
+    for word in sentence:
         if word in w2i:
             bow[w2i[word]] += 1
     return bow
@@ -113,7 +132,7 @@ def make_word_vector(uttrs_list, w2i, dialog_maxlen, uttr_maxlen):
     for uttrs in uttrs_list:
         dialog = []
         for sentence in uttrs:
-            sent_vec = [w2i[w] for w in sentence]
+            sent_vec = [w2i[w] if w in w2i else w2i[UNK] for w in sentence]
             sent_vec = add_padding(sent_vec, uttr_maxlen)
             dialog.append(sent_vec)
         for _ in range(dialog_maxlen - len(dialog)):
