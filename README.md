@@ -6,7 +6,7 @@ https://arxiv.org/abs/1702.03274
 
 ## Setup
 
-You need to download data.
+You need to download following data.
 
 - [Dialog bAbI Tasks Data 1-6](https://fb-public.box.com/s/chnq60iivzv5uckpvj2n2vijlyepze6w)
 ```

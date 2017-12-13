@@ -1,5 +1,6 @@
 import random
 import copy
+import argparse
 from gensim.models.keyedvectors import KeyedVectors
 import torch
 import torch.nn.functional as F
@@ -7,25 +8,32 @@ import torch.nn.functional as F
 from utils import save_pickle, load_pickle, load_vocab, load_embd_weights, get_entities, load_data, make_word_vector, to_var
 from models import HybridCodeNetwork
 
-embd_size = 300
-hidden_size = 128
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--batch_size', type=int, default=1, help='each dialog formed one minibatch')
+parser.add_argument('--embd_size', type=int, default=300, help='word embedding size')
+parser.add_argument('--hidden_size', type=int, default=128, help='hidden size for LSTM')
+parser.add_argument('--test', type=int, default=0, help='1 for test, or for training')
+parser.add_argument('--resume', default='./checkpoints/model_best.tar', type=str, metavar='PATH', help='path saved params')
+parser.add_argument('--seed', type=int, default=1111, help='random seed')
+args = parser.parse_args()
+
+# Set the random seed manually for reproducibility.
+torch.manual_seed(args.seed)
 
 
 entities = get_entities('dialog-bAbI-tasks/dialog-babi-kb-all.txt')
-
 for idx, (ent_name, ent_vals) in enumerate(entities.items()):
     print('entities', idx, ent_name, ent_vals[0] )
 
-# create training dataset
 SILENT = '<SILENT>'
 UNK = '<UNK>'
 system_acts = [SILENT]
 fpath_train = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-trn.txt'
 fpath_test = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-tst-OOV.txt'
 vocab = []
-vocab = load_vocab(fpath_train, vocab)
-# vocab = load_vocab(fpath_test, vocab)
-print(vocab)
+vocab = load_vocab(fpath_train, vocab) # only read training for vocab because OOV vocabrary should not know.
+# print(vocab)
 w2i = dict((w, i) for i, w in enumerate(vocab, 1))
 i2w = dict((i, w) for i, w in enumerate(vocab, 1))
 w2i[UNK] = 0
@@ -50,17 +58,24 @@ print('action_size:', len(system_acts))
 # save_pickle(pre_embd_w, 'pre_embd_w.pickle')
 pre_embd_w = load_pickle('pre_embd_w.pickle')
 
-model = HybridCodeNetwork(len(vocab), embd_size, hidden_size, len(system_acts), pre_embd_w)
+model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w)
 if torch.cuda.is_available():
     model.cuda()
 optimizer = torch.optim.Adadelta(filter(lambda p: p.requires_grad, model.parameters()))
+
+
+def padding(data, default_val, maxlen):
+    for i, d in enumerate(data):
+        pad_len = maxlen - len(d)
+        for _ in range(pad_len):
+            data[i].append([default_val] * len(entities.keys()))
+    return to_var(torch.FloatTensor(data))
 
 
 def get_data_from_batch(batch, w2i, act2i):
     uttrs_list = [d[0] for d in batch]
     dialog_maxlen = max([len(uttrs) for uttrs in uttrs_list])
     uttr_maxlen = max([len(u) for uttrs in uttrs_list for u in uttrs])
-    # print('dialog_maxlen', dialog_maxlen, ', uttr_maxlen', uttr_maxlen)
     uttr_var = make_word_vector(uttrs_list, w2i, dialog_maxlen, uttr_maxlen)
 
     batch_labels = [d[1] for d in batch]
@@ -73,21 +88,27 @@ def get_data_from_batch(batch, w2i, act2i):
         labels_var.append(torch.LongTensor(vec_labels))
     labels_var = to_var(torch.stack(labels_var, 0))
 
-    context = copy.deepcopy([d[2] for d in batch])
-    for i, c in enumerate(context):
-        pad_len = dialog_maxlen - len(c)
+    batch_prev_acts = [d[4] for d in batch]
+    prev_var = []
+    for prev_acts in batch_prev_acts:
+        vec_prev_acts = []
+        for act in prev_acts:
+            tmp = [0] * len(act2i)
+            tmp[act2i[act]] = 1
+            vec_prev_acts.append(tmp)
+        pad_len = dialog_maxlen - len(prev_acts)
         for _ in range(pad_len):
-            context[i].append([1] * len(entities.keys()))
-    context = to_var(torch.FloatTensor(context))
+            vec_prev_acts.append([0] * len(act2i))
+        prev_var.append(torch.FloatTensor(vec_prev_acts))
+    prev_var = to_var(torch.stack(prev_var, 0))
+
+    context = copy.deepcopy([d[2] for d in batch])
+    context = padding(context, 1, dialog_maxlen)
 
     bow = copy.deepcopy([d[3] for d in batch])
-    for i, b in enumerate(bow):
-        pad_len = dialog_maxlen - len(b)
-        for _ in range(pad_len):
-            bow[i].append([0] * len(w2i))
-    bow = to_var(torch.FloatTensor(bow))
+    bow = padding(bow, 0, dialog_maxlen)
 
-    return uttr_var, labels_var, context, bow
+    return uttr_var, labels_var, context, bow, prev_var
 
 
 def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
@@ -99,9 +120,9 @@ def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
         acc, total = 0, 0
         for batch_idx in range(0, len(data)-batch_size, batch_size):
             batch = data[batch_idx:batch_idx+batch_size]
-            uttrs, labels, contexts, bows = get_data_from_batch(batch, w2i, act2i)
+            uttrs, labels, contexts, bows, prevs = get_data_from_batch(batch, w2i, act2i)
 
-            preds = model(uttrs, contexts, bows)
+            preds = model(uttrs, contexts, bows, prevs)
             action_size = preds.size(-1)
             preds = preds.view(-1, action_size)
             labels = labels.view(-1)
@@ -122,17 +143,16 @@ def test(model, data, w2i, act2i, batch_size=1):
     acc, total = 0, 0
     for batch_idx in range(0, len(data)-batch_size, batch_size):
         batch = data[batch_idx:batch_idx+batch_size]
-        uttrs, labels, contexts, bows = get_data_from_batch(batch, w2i, act2i)
+        uttrs, labels, contexts, bows, prevs = get_data_from_batch(batch, w2i, act2i)
 
-        preds = model(uttrs, contexts, bows)
+        preds = model(uttrs, contexts, bows, prevs)
         action_size = preds.size(-1)
         preds = preds.view(-1, action_size)
         labels = labels.view(-1)
-        loss = F.nll_loss(preds, labels)
+        # loss = F.nll_loss(preds, labels)
         acc += torch.sum(labels == torch.max(preds, 1)[1]).data[0]
         total += labels.size(0)
     print('Test Acc: {:.3f}% ({}/{})'.format(100 * acc/total, acc, total))
-    # print('loss', loss.data[0])
 
 train(model, train_data, optimizer, w2i, act2i)
 test(model, test_data, w2i, act2i)

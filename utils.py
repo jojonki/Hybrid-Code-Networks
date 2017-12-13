@@ -73,14 +73,15 @@ def load_data(fpath, entities, w2i, system_acts):
     data = []
     with open(fpath, 'r') as f:
         lines = f.readlines()
-        x, y, c, b = [], [], [], []
+        # x: user uttr, y: sys act, c: context, b: BoW, p: previous sys act
+        x, y, c, b, p = [], [], [], [], []
         context = [0] * len(entities.keys())
         for idx, l in enumerate(lines):
             l = l.rstrip()
             if l == '':
-                data.append((x, y, c, b))
+                data.append((x, y, c, b, p))
                 # reset
-                x, y, c, b = [], [], [], []
+                x, y, c, b, p = [], [], [], [], []
                 context = [0] * len(entities.keys())
             else:
                 ls = l.split("\t")
@@ -99,6 +100,10 @@ def load_data(fpath, entities, w2i, system_acts):
                     continue # TODO
 
                 x.append(uttr)
+                if len(y) == 0:
+                    p.append(SILENT)
+                else:
+                    p.append(y[-1])
                 y.append(sys_act)
                 c.append(copy.copy((context)))
                 b.append(bow)
