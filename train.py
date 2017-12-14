@@ -16,7 +16,7 @@ parser.add_argument('--batch_size', type=int, default=1, help='each dialog forme
 parser.add_argument('--embd_size', type=int, default=300, help='word embedding size')
 parser.add_argument('--hidden_size', type=int, default=128, help='hidden size for LSTM')
 parser.add_argument('--test', type=int, default=0, help='1 for test, or for training')
-parser.add_argument('--resume', default='./checkpoints/model_best.tar', type=str, metavar='PATH', help='path saved params')
+parser.add_argument('--task', type=int, default=5, help='5 for Task 5 and 6 for Task 6')
 parser.add_argument('--seed', type=int, default=1111, help='random seed')
 args = parser.parse_args()
 
@@ -28,11 +28,18 @@ entities = get_entities('dialog-bAbI-tasks/dialog-babi-kb-all.txt')
 for idx, (ent_name, ent_vals) in enumerate(entities.items()):
     print('entities', idx, ent_name, ent_vals[0] )
 
+assert args.task == 5 or args.task == 6, 'task must be 5 or 6'
+if args.task == 5:
+    fpath_train = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-trn.txt'
+    fpath_test = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-tst-OOV.txt'
+elif args.task == 6:
+    fpath_train = 'dialog-bAbI-tasks/dialog-babi-task6-dstc2-trn.txt'
+    fpath_test = 'dialog-bAbI-tasks/dialog-babi-task6-dstc2-tst.txt'
+
 SILENT = '<SILENT>'
 UNK = '<UNK>'
 system_acts = [SILENT]
-fpath_train = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-trn.txt'
-fpath_test = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-tst-OOV.txt'
+
 vocab = []
 vocab, system_acts = preload(fpath_train, vocab, system_acts) # only read training for vocab because OOV vocabrary should not know.
 # print(vocab)
@@ -54,12 +61,12 @@ print('action_size:', len(system_acts))
 for act, i in act2i.items():
     print('act', i, act)
 
-print('loading a word2vec binary...')
-model_path = './data/GoogleNews-vectors-negative300.bin'
-word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
-print('done')
-pre_embd_w = load_embd_weights(word2vec, len(vocab), embd_size, w2i)
-save_pickle(pre_embd_w, 'pre_embd_w.pickle')
+# print('loading a word2vec binary...')
+# model_path = './data/GoogleNews-vectors-negative300.bin'
+# word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
+# print('done')
+# pre_embd_w = load_embd_weights(word2vec, len(vocab), args.embd_size, w2i)
+# save_pickle(pre_embd_w, 'pre_embd_w.pickle')
 pre_embd_w = load_pickle('pre_embd_w.pickle')
 
 model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w)
@@ -128,9 +135,9 @@ def categorical_cross_entropy(preds, labels):
 
 def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
     print('----Train---')
+    data = copy.copy(data)
     for epoch in range(n_epochs):
         print('Epoch', epoch)
-        data = copy.copy(data)
         random.shuffle(data)
         acc, total = 0, 0
         for batch_idx in range(0, len(data)-batch_size, batch_size):
