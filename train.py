@@ -4,8 +4,10 @@ import argparse
 from gensim.models.keyedvectors import KeyedVectors
 import torch
 import torch.nn.functional as F
+from torch.autograd import Variable
 
-from utils import save_pickle, load_pickle, load_vocab, load_embd_weights, get_entities, load_data, make_word_vector, to_var
+from utils import save_pickle, load_pickle, preload, load_embd_weights, load_data, to_var
+from utils import get_entities, make_word_vector
 from models import HybridCodeNetwork
 
 
@@ -32,7 +34,7 @@ system_acts = [SILENT]
 fpath_train = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-trn.txt'
 fpath_test = 'dialog-bAbI-tasks/dialog-babi-task5-full-dialogs-tst-OOV.txt'
 vocab = []
-vocab = load_vocab(fpath_train, vocab) # only read training for vocab because OOV vocabrary should not know.
+vocab, system_acts = preload(fpath_train, vocab, system_acts) # only read training for vocab because OOV vocabrary should not know.
 # print(vocab)
 w2i = dict((w, i) for i, w in enumerate(vocab, 1))
 i2w = dict((i, w) for i, w in enumerate(vocab, 1))
@@ -49,13 +51,15 @@ max_turn = max(max_turn_train, max_turn_test)
 print('max turn:', max_turn)
 act2i = dict((act, i) for i, act in enumerate(system_acts))
 print('action_size:', len(system_acts))
+for act, i in act2i.items():
+    print('act', i, act)
 
-# print('loading a word2vec binary...')
-# model_path = './data/GoogleNews-vectors-negative300.bin'
-# word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
-# print('done')
-# pre_embd_w = load_embd_weights(word2vec, len(vocab), embd_size, w2i)
-# save_pickle(pre_embd_w, 'pre_embd_w.pickle')
+print('loading a word2vec binary...')
+model_path = './data/GoogleNews-vectors-negative300.bin'
+word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
+print('done')
+pre_embd_w = load_embd_weights(word2vec, len(vocab), embd_size, w2i)
+save_pickle(pre_embd_w, 'pre_embd_w.pickle')
 pre_embd_w = load_pickle('pre_embd_w.pickle')
 
 model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w)
@@ -108,7 +112,18 @@ def get_data_from_batch(batch, w2i, act2i):
     bow = copy.deepcopy([d[3] for d in batch])
     bow = padding(bow, 0, dialog_maxlen)
 
-    return uttr_var, labels_var, context, bow, prev_var
+    act_filter = copy.deepcopy([d[5] for d in batch])
+    act_filter = padding(act_filter, 0, dialog_maxlen)
+
+    return uttr_var, labels_var, context, bow, prev_var, act_filter
+
+
+def categorical_cross_entropy(preds, labels):
+    loss = Variable(torch.zeros(1))
+    for p, label in zip(preds, labels):
+        loss -= torch.log(p[label] + 1.e-7).cpu()
+    loss /= preds.size(0)
+    return loss
 
 
 def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
@@ -120,13 +135,14 @@ def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
         acc, total = 0, 0
         for batch_idx in range(0, len(data)-batch_size, batch_size):
             batch = data[batch_idx:batch_idx+batch_size]
-            uttrs, labels, contexts, bows, prevs = get_data_from_batch(batch, w2i, act2i)
+            uttrs, labels, contexts, bows, prevs, act_fils = get_data_from_batch(batch, w2i, act2i)
 
-            preds = model(uttrs, contexts, bows, prevs)
+            preds = model(uttrs, contexts, bows, prevs, act_fils)
             action_size = preds.size(-1)
             preds = preds.view(-1, action_size)
             labels = labels.view(-1)
-            loss = F.nll_loss(preds, labels)
+            # loss = F.nll_loss(preds, labels)
+            loss = categorical_cross_entropy(preds, labels)
             acc += torch.sum(labels == torch.max(preds, 1)[1]).data[0]
             total += labels.size(0)
             if batch_idx % (100 * batch_size) == 0:
@@ -143,9 +159,9 @@ def test(model, data, w2i, act2i, batch_size=1):
     acc, total = 0, 0
     for batch_idx in range(0, len(data)-batch_size, batch_size):
         batch = data[batch_idx:batch_idx+batch_size]
-        uttrs, labels, contexts, bows, prevs = get_data_from_batch(batch, w2i, act2i)
+        uttrs, labels, contexts, bows, prevs, act_fils = get_data_from_batch(batch, w2i, act2i)
 
-        preds = model(uttrs, contexts, bows, prevs)
+        preds = model(uttrs, contexts, bows, prevs, act_fils)
         action_size = preds.size(-1)
         preds = preds.view(-1, action_size)
         labels = labels.view(-1)

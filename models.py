@@ -29,11 +29,12 @@ class HybridCodeNetwork(nn.Module):
         self.lstm = nn.LSTM(lstm_in_dim, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, action_size)
 
-    def forward(self, uttr, context, bow, prev):
-        # uttr    : (bs, dialog_len, sentence_len)
-        # context : (bs, dialog_len, context_dim)
-        # bow     : (bs, dialog_len, vocab_size)
-        # prev    : (bs, dialog_len, action_size)
+    def forward(self, uttr, context, bow, prev, act_filter):
+        # uttr       : (bs, dialog_len, sentence_len)
+        # context    : (bs, dialog_len, context_dim)
+        # bow        : (bs, dialog_len, vocab_size)
+        # prev       : (bs, dialog_len, action_size)
+        # act_filter : (bs, dialog_len, action_size)
         bs = uttr.size(0)
         dlg_len = uttr.size(1)
         sent_len = uttr.size(2)
@@ -42,6 +43,8 @@ class HybridCodeNetwork(nn.Module):
         embd = embd.view(bs, dlg_len, sent_len, -1) # (bs, dialog_len, sentence_len, embd)
         embd = torch.mean(embd, 2) # (bs, dialog_len, embd)
         x = torch.cat((embd, context, bow, prev), 2) # (bs, dialog_len, embd+context_dim)
-        x, (h, c) = self.lstm(x) # (bs, seq, hid), ((1, bs, hid), (1, bs, hid))
-        y = F.log_softmax(self.fc(F.tanh(x)), -1) # (bs, seq, action_size)
+        x, (h, c) = self.lstm(x) # (bs, dialog_len, hid), ((1, bs, hid), (1, bs, hid))
+        y = self.fc(F.tanh(x)) # (bs, dialog_len, action_size)
+        y = F.softmax(y, -1) # (bs, dialog_len, action_size)
+        y = y * act_filter
         return y

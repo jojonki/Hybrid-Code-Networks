@@ -2,6 +2,7 @@ import re
 import copy
 import pickle
 import numpy as np
+from collections import OrderedDict
 import torch
 from torch.autograd import Variable
 
@@ -22,8 +23,7 @@ def load_pickle(path):
 
 
 def get_entities(fpath):
-    # entities = {}
-    entities = {'R_cuisine': [], 'R_location': [], 'R_price': [], 'R_number': []}
+    entities = OrderedDict({'R_cuisine': [], 'R_location': [], 'R_price': [], 'R_number': []})
     with open(fpath, 'r') as file:
         lines = file.readlines()
         for l in lines:
@@ -51,7 +51,7 @@ def load_embd_weights(word2vec, vocab_size, embd_size, w2i):
     return torch.from_numpy(embedding_matrix).type(torch.FloatTensor)
 
 
-def load_vocab(fpath, vocab):
+def preload(fpath, vocab, system_acts):
     with open(fpath, 'r') as f:
         lines = f.readlines()
         for idx, l in enumerate(lines):
@@ -65,23 +65,29 @@ def load_vocab(fpath, vocab):
                     for w in uttr:
                         if w not in vocab:
                             vocab.append(w)
+                if len(ls) == 2: # includes user and system utterance
+                    sys_act = ls[1]
+                    sys_act = re.sub(r'resto_\S+', '', sys_act)
+                    if sys_act.startswith('api_call'): sys_act = 'api_call'
+                    if sys_act not in system_acts: system_acts.append(sys_act)
     vocab = sorted(vocab)
-    return vocab
+    system_acts = sorted(system_acts)
+    return vocab, system_acts
 
 
 def load_data(fpath, entities, w2i, system_acts):
     data = []
     with open(fpath, 'r') as f:
         lines = f.readlines()
-        # x: user uttr, y: sys act, c: context, b: BoW, p: previous sys act
-        x, y, c, b, p = [], [], [], [], []
-        context = [0] * len(entities.keys())
+        # x: user uttr, y: sys act, c: context, b: BoW, p: previous sys act, f: action filter
+        x, y, c, b, p, f = [], [], [], [], [], []
+        context    = [0] * len(entities.keys())
         for idx, l in enumerate(lines):
             l = l.rstrip()
             if l == '':
-                data.append((x, y, c, b, p))
+                data.append((x, y, c, b, p, f))
                 # reset
-                x, y, c, b, p = [], [], [], [], []
+                x, y, c, b, p, f = [], [], [], [], [], []
                 context = [0] * len(entities.keys())
             else:
                 ls = l.split("\t")
@@ -89,13 +95,13 @@ def load_data(fpath, entities, w2i, system_acts):
                 # turn = t_u[0]
                 uttr = t_u[1].split(' ')
                 update_context(context, uttr, entities)
+                act_filter = generate_act_filter(len(system_acts), context)
                 bow = get_bow(uttr, w2i)
                 sys_act = SILENT
                 if len(ls) == 2: # includes user and system utterance
                     sys_act = ls[1]
                     sys_act = re.sub(r'resto_\S+', '', sys_act)
                     if sys_act.startswith('api_call'): sys_act = 'api_call'
-                    if sys_act not in system_acts: system_acts.append(sys_act)
                 else:
                     continue # TODO
 
@@ -105,8 +111,9 @@ def load_data(fpath, entities, w2i, system_acts):
                 else:
                     p.append(y[-1])
                 y.append(sys_act)
-                c.append(copy.copy((context)))
+                c.append(copy.deepcopy(context))
                 b.append(bow)
+                f.append(act_filter)
     return data, system_acts
 
 
@@ -115,6 +122,55 @@ def update_context(context, sentence, entities):
         for w in sentence:
             if w in ent_vals:
                 context[idx] = 1
+
+
+def generate_act_filter(action_size, context):
+    mask = [0] * action_size
+    # TODO hard coding
+    # 0  <SILENT>
+    # 1  any preference on a type of cuisine
+    # 2  api_call
+    # 3  great let me do the reservation
+    # 4  hello what can i help you with today
+    # 5  here it is
+    # 6  how many people would be in your party
+    # 7  i'm on it
+    # 8  is there anything i can help you with
+    # 9  ok let me look into some options for you
+    # 10 sure is there anything else to update
+    # 11 sure let me find an other option for you
+    # 12 what do you think of this option:
+    # 13 where should it be
+    # 14 which price range are looking for
+    # 15 you're welcome
+    # context: {'R_cuisine': [], 'R_location': [], 'R_price': [], 'R_number': []}
+    mask[0] = 1
+    mask[7] = 1
+    mask[8] = 1
+    if context == [0, 0, 0, 0]:
+        mask[4] = 1
+
+    if context == [1, 1, 1, 1]:
+        mask[2] = 1
+        mask[3] = 1
+        mask[5] = 1
+        mask[8] = 1
+        mask[9] = 1
+        mask[10] = 1
+        mask[11] = 1
+        mask[12] = 1
+        mask[15] = 1
+
+    if context[0] == 0: # R_cuisine
+        mask[1] = 1
+    if context[1] == 0: # R_location
+        mask[13] = 1
+    if context[2] == 0: # R_price
+        mask[14] = 1
+    if context[3] == 0: # R_number
+        mask[6] = 1
+
+    return mask
 
 
 def get_bow(sentence, w2i):
