@@ -32,4 +32,3 @@ $ python train.py --test 1
 ## TODOs
 - [ ] test Task6
 - [ ] Reinforcement Learning
-- [ ] Action mask
