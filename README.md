@@ -7,6 +7,8 @@ https://arxiv.org/abs/1702.03274
 
 This repo contains the implementation of Hybrid Code Networks in PyTorch.
 
+<img src="https://user-images.githubusercontent.com/166852/33999718-389cdb26-e0b9-11e7-8708-140da0803a5b.png" >
+
 ## Setup
 
 You need to download following data.
