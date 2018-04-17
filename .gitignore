@@ -1,0 +1,6 @@
+data/
+dialog-bAbI-tasks/
+__pycache__/
+*.pickle
+*.ipynb
+*.tgz
