@@ -5,9 +5,10 @@ import numpy as np
 from collections import OrderedDict
 import torch
 from torch.autograd import Variable
+import global_variables as g
 
-SILENT = '<SILENT>' # TODO hard code
-UNK = '<UNK>'
+# SILENT = '<SILENT>' # TODO hard code
+# UNK = '<UNK>'
 
 
 def save_pickle(d, path):
@@ -97,7 +98,7 @@ def load_data(fpath, entities, w2i, system_acts):
                 update_context(context, uttr, entities)
                 act_filter = generate_act_filter(len(system_acts), context)
                 bow = get_bow(uttr, w2i)
-                sys_act = SILENT
+                sys_act = g.SILENT
                 if len(ls) == 2: # includes user and system utterance
                     sys_act = ls[1]
                     sys_act = re.sub(r'resto_\S+', '', sys_act)
@@ -107,7 +108,7 @@ def load_data(fpath, entities, w2i, system_acts):
 
                 x.append(uttr)
                 if len(y) == 0:
-                    p.append(SILENT)
+                    p.append(g.SILENT)
                 else:
                     p.append(y[-1])
                 y.append(sys_act)
@@ -193,7 +194,7 @@ def make_word_vector(uttrs_list, w2i, dialog_maxlen, uttr_maxlen):
     for uttrs in uttrs_list:
         dialog = []
         for sentence in uttrs:
-            sent_vec = [w2i[w] if w in w2i else w2i[UNK] for w in sentence]
+            sent_vec = [w2i[w] if w in w2i else w2i[g.UNK] for w in sentence]
             sent_vec = add_padding(sent_vec, uttr_maxlen)
             dialog.append(sent_vec)
         for _ in range(dialog_maxlen - len(dialog)):

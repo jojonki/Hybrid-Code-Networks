@@ -9,6 +9,7 @@ from torch.autograd import Variable
 from utils import save_pickle, load_pickle, preload, load_embd_weights, load_data, to_var
 from utils import get_entities, make_word_vector
 from models import HybridCodeNetwork
+import global_variables as g
 
 
 parser = argparse.ArgumentParser()
@@ -22,6 +23,8 @@ args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
+random.seed(args.seed)
+# np.random.seed(args.seed)
 
 
 entities = get_entities('dialog-bAbI-tasks/dialog-babi-kb-all.txt')
@@ -36,17 +39,16 @@ elif args.task == 6:
     fpath_train = 'dialog-bAbI-tasks/dialog-babi-task6-dstc2-trn.txt'
     fpath_test = 'dialog-bAbI-tasks/dialog-babi-task6-dstc2-tst.txt'
 
-SILENT = '<SILENT>'
-UNK = '<UNK>'
-system_acts = [SILENT]
+system_acts = [g.SILENT]
 
 vocab = []
-vocab, system_acts = preload(fpath_train, vocab, system_acts) # only read training for vocab because OOV vocabrary should not know.
+vocab, system_acts = preload(fpath_train, vocab, system_acts) # only read training vocabs because OOV vocabrary should not be contained
+vocab = [g.UNK] + vocab
 # print(vocab)
-w2i = dict((w, i) for i, w in enumerate(vocab, 1))
-i2w = dict((i, w) for i, w in enumerate(vocab, 1))
-w2i[UNK] = 0
-i2w[0] = UNK
+w2i = dict((w, i) for i, w in enumerate(vocab))
+i2w = dict((i, w) for i, w in enumerate(vocab))
+# w2i[g.UNK] = 0
+# i2w[0] = g.UNK
 train_data, system_acts = load_data(fpath_train, entities, w2i, system_acts)
 test_data, system_acts = load_data(fpath_test, entities, w2i, system_acts)
 print('vocab size:', len(vocab))
@@ -95,7 +97,7 @@ def get_data_from_batch(batch, w2i, act2i):
         vec_labels = [act2i[l] for l in labels]
         pad_len = dialog_maxlen - len(labels)
         for _ in range(pad_len):
-            vec_labels.append(act2i[SILENT])
+            vec_labels.append(act2i[g.SILENT])
         labels_var.append(torch.LongTensor(vec_labels))
     labels_var = to_var(torch.stack(labels_var, 0))
 
@@ -136,8 +138,8 @@ def categorical_cross_entropy(preds, labels):
 def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
     print('----Train---')
     data = copy.copy(data)
-    for epoch in range(n_epochs):
-        print('Epoch', epoch)
+    for epoch in range(1, n_epochs + 1):
+        print('Epoch', epoch, '---------')
         random.shuffle(data)
         acc, total = 0, 0
         for batch_idx in range(0, len(data)-batch_size, batch_size):
@@ -176,6 +178,7 @@ def test(model, data, w2i, act2i, batch_size=1):
         acc += torch.sum(labels == torch.max(preds, 1)[1]).data[0]
         total += labels.size(0)
     print('Test Acc: {:.3f}% ({}/{})'.format(100 * acc/total, acc, total))
+
 
 train(model, train_data, optimizer, w2i, act2i)
 test(model, test_data, w2i, act2i)
