@@ -1,12 +1,13 @@
+import os
 import random
 import copy
 import argparse
-from gensim.models.keyedvectors import KeyedVectors
+# from gensim.models.keyedvectors import KeyedVectors
 import torch
-import torch.nn.functional as F
+# import torch.nn.functional as F
 from torch.autograd import Variable
 
-from utils import save_pickle, load_pickle, preload, load_embd_weights, load_data, to_var
+from utils import save_pickle, load_pickle, preload, load_embd_weights, load_data, to_var, save_checkpoint
 from utils import get_entities, make_word_vector
 from models import HybridCodeNetwork
 import global_variables as g
@@ -17,9 +18,12 @@ parser.add_argument('--batch_size', type=int, default=1, help='each dialog forme
 parser.add_argument('--embd_size', type=int, default=300, help='word embedding size')
 parser.add_argument('--hidden_size', type=int, default=128, help='hidden size for LSTM')
 parser.add_argument('--test', type=int, default=0, help='1 for test, or for training')
+parser.add_argument('--save_model', type=int, default=1, help='path saved params')
 parser.add_argument('--task', type=int, default=5, help='5 for Task 5 and 6 for Task 6')
 parser.add_argument('--seed', type=int, default=1111, help='random seed')
+parser.add_argument('--resume', type=str, metavar='PATH', help='path saved params')
 args = parser.parse_args()
+
 
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -44,11 +48,8 @@ system_acts = [g.SILENT]
 vocab = []
 vocab, system_acts = preload(fpath_train, vocab, system_acts) # only read training vocabs because OOV vocabrary should not be contained
 vocab = [g.UNK] + vocab
-# print(vocab)
 w2i = dict((w, i) for i, w in enumerate(vocab))
 i2w = dict((i, w) for i, w in enumerate(vocab))
-# w2i[g.UNK] = 0
-# i2w[0] = g.UNK
 train_data, system_acts = load_data(fpath_train, entities, w2i, system_acts)
 test_data, system_acts = load_data(fpath_test, entities, w2i, system_acts)
 print('vocab size:', len(vocab))
@@ -63,6 +64,7 @@ print('action_size:', len(system_acts))
 for act, i in act2i.items():
     print('act', i, act)
 
+# use saved pickle since loading word2vec is slow.
 # print('loading a word2vec binary...')
 # model_path = './data/GoogleNews-vectors-negative300.bin'
 # word2vec = KeyedVectors.load_word2vec_format('./data/GoogleNews-vectors-negative300.bin', binary=True)
@@ -70,11 +72,6 @@ for act, i in act2i.items():
 # pre_embd_w = load_embd_weights(word2vec, len(vocab), args.embd_size, w2i)
 # save_pickle(pre_embd_w, 'pre_embd_w.pickle')
 pre_embd_w = load_pickle('pre_embd_w.pickle')
-
-model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w)
-if torch.cuda.is_available():
-    model.cuda()
-optimizer = torch.optim.Adadelta(filter(lambda p: p.requires_grad, model.parameters()))
 
 
 def padding(data, default_val, maxlen):
@@ -161,6 +158,16 @@ def train(model, data, optimizer, w2i, act2i, n_epochs=5, batch_size=1):
             loss.backward()
             optimizer.step()
 
+        # save the model {{{
+        if args.save_model == 1:
+            filename = 'ckpts/HCN-Epoch-{}.model'.format(epoch)
+            save_checkpoint({
+                'epoch'      : epoch,
+                'state_dict' : model.state_dict(),
+                'optimizer'  : optimizer.state_dict()
+            }, filename=filename)
+        # }}}
+
 
 def test(model, data, w2i, act2i, batch_size=1):
     print('----Test---')
@@ -180,5 +187,20 @@ def test(model, data, w2i, act2i, batch_size=1):
     print('Test Acc: {:.3f}% ({}/{})'.format(100 * acc/total, acc, total))
 
 
-train(model, train_data, optimizer, w2i, act2i)
+model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w)
+if torch.cuda.is_available():
+    model.cuda()
+optimizer = torch.optim.Adadelta(filter(lambda p: p.requires_grad, model.parameters()))
+
+if args.resume is not None and os.path.isfile(args.resume):
+    print("=> loading checkpoint '{}'".format(args.resume))
+    ckpt = torch.load(args.resume)
+    start_epoch = ckpt['epoch'] + 1 if 'epoch' in ckpt else args.start_epoch
+    model.load_state_dict(ckpt['state_dict'])
+    optimizer.load_state_dict(ckpt['optimizer'])
+else:
+    print("=> no checkpoint found")
+
+if args.test != 1:
+    train(model, train_data, optimizer, w2i, act2i)
 test(model, test_data, w2i, act2i)

@@ -7,8 +7,10 @@ import torch
 from torch.autograd import Variable
 import global_variables as g
 
-# SILENT = '<SILENT>' # TODO hard code
-# UNK = '<UNK>'
+
+def save_checkpoint(state, filename='./checkpoints/checkpoint.pth.tar'):
+    print('save model!', filename)
+    torch.save(state, filename)
 
 
 def save_pickle(d, path):

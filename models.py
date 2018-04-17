@@ -24,11 +24,10 @@ class HybridCodeNetwork(nn.Module):
         super(HybridCodeNetwork, self).__init__()
         self.embd_size = embd_size
         self.hidden_size = hidden_size
+        # lstm_in_dim = embd_size + vocab_size + action_size + 4 # 4 (context size)
+        # lstm_in_dim = embd_size  # 4 (context size)
+        lstm_in_dim = vocab_size# 4 (context size)
         self.embedding = WordEmbedding(vocab_size, embd_size, pre_embd_w)
-        lstm_in_dim = embd_size + vocab_size + action_size + 4 # 4 (context size) + 1 (Unknown vocab tag)
-        # lstm_in_dim = embd_size  # 4 (context size) + 1 (Unknown vocab tag)
-        # lstm_in_dim = vocab_size + 1  # 4 (context size) + 1 (Unknown vocab tag)
-        # lstm_in_dim = vocab_size  # 4 (context size) + 1 (Unknown vocab tag)
         self.lstm = nn.LSTM(lstm_in_dim, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, action_size)
 
@@ -45,10 +44,10 @@ class HybridCodeNetwork(nn.Module):
         embd = self.embedding(uttr.view(bs, -1)) # (bs, dialog_len*sentence_len, embd)
         embd = embd.view(bs, dlg_len, sent_len, -1) # (bs, dialog_len, sentence_len, embd)
         embd = torch.mean(embd, 2) # (bs, dialog_len, embd)
-        x = torch.cat((embd, context, bow, prev), 2) # (bs, dialog_len, embd+context_dim)
+        # x = torch.cat((embd, context, bow, prev), 2) # (bs, dialog_len, embd+context_dim)
         # x = torch.cat((embd), 2) # (bs, dialog_len, embd+context_dim)
         # x = embd # (bs, dialog_len, embd+context_dim)
-        # x = bow # (bs, dialog_len, embd+context_dim)
+        x = bow # (bs, dialog_len, embd+context_dim)
         x, (h, c) = self.lstm(x) # (bs, dialog_len, hid), ((1, bs, hid), (1, bs, hid))
         y = self.fc(F.tanh(x)) # (bs, dialog_len, action_size)
         y = F.softmax(y, -1) # (bs, dialog_len, action_size)
