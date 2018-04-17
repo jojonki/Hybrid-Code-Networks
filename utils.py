@@ -79,6 +79,9 @@ def preload(fpath, vocab, system_acts):
 
 
 def load_data(fpath, entities, w2i, system_acts):
+    '''
+    store data as dialog (multi turns)
+    '''
     data = []
     with open(fpath, 'r') as f:
         lines = f.readlines()
@@ -210,3 +213,53 @@ def to_var(x):
     if torch.cuda.is_available():
         x = x.cuda()
     return Variable(x)
+
+
+def padding(data, default_val, maxlen, pad_seq_len):
+    for i, d in enumerate(data):
+        pad_len = maxlen - len(d)
+        for _ in range(pad_len):
+            data[i].append([default_val] * pad_seq_len)
+    return to_var(torch.FloatTensor(data))
+
+
+def get_data_from_batch(batch, w2i, act2i):
+    uttrs_list = [d[0] for d in batch]
+    dialog_maxlen = max([len(uttrs) for uttrs in uttrs_list])
+    uttr_maxlen = max([len(u) for uttrs in uttrs_list for u in uttrs])
+    uttr_var = make_word_vector(uttrs_list, w2i, dialog_maxlen, uttr_maxlen)
+
+    batch_labels = [d[1] for d in batch]
+    labels_var = []
+    for labels in batch_labels:
+        vec_labels = [act2i[l] for l in labels]
+        pad_len = dialog_maxlen - len(labels)
+        for _ in range(pad_len):
+            vec_labels.append(act2i[g.SILENT])
+        labels_var.append(torch.LongTensor(vec_labels))
+    labels_var = to_var(torch.stack(labels_var, 0))
+
+    batch_prev_acts = [d[4] for d in batch]
+    prev_var = []
+    for prev_acts in batch_prev_acts:
+        vec_prev_acts = []
+        for act in prev_acts:
+            tmp = [0] * len(act2i)
+            tmp[act2i[act]] = 1
+            vec_prev_acts.append(tmp)
+        pad_len = dialog_maxlen - len(prev_acts)
+        for _ in range(pad_len):
+            vec_prev_acts.append([0] * len(act2i))
+        prev_var.append(torch.FloatTensor(vec_prev_acts))
+    prev_var = to_var(torch.stack(prev_var, 0))
+
+    context = copy.deepcopy([d[2] for d in batch])
+    context = padding(context, 1, dialog_maxlen, len(context[0][0]))
+
+    bow = copy.deepcopy([d[3] for d in batch])
+    bow = padding(bow, 0, dialog_maxlen, len(bow[0][0]))
+
+    act_filter = copy.deepcopy([d[5] for d in batch])
+    act_filter = padding(act_filter, 0, dialog_maxlen, len(act_filter[0][0]))
+
+    return uttr_var, labels_var, context, bow, prev_var, act_filter
