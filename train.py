@@ -2,9 +2,7 @@ import os
 import random
 import copy
 import argparse
-# from gensim.models.keyedvectors import KeyedVectors
 import torch
-# import torch.nn.functional as F
 from torch.autograd import Variable
 
 from utils import save_pickle, load_pickle, preload, load_embd_weights, load_data, to_var, save_checkpoint
@@ -46,7 +44,8 @@ elif args.task == 6:
 system_acts = [g.SILENT]
 
 vocab = []
-vocab, system_acts = preload(fpath_train, vocab, system_acts) # only read training vocabs because OOV vocabrary should not be contained
+# only read training vocabs because OOV vocabrary should not be contained
+vocab, system_acts = preload(fpath_train, vocab, system_acts)
 vocab = [g.UNK] + vocab
 w2i = dict((w, i) for i, w in enumerate(vocab))
 i2w = dict((i, w) for i, w in enumerate(vocab))
@@ -187,7 +186,8 @@ def test(model, data, w2i, act2i, batch_size=1):
     print('Test Acc: {:.3f}% ({}/{})'.format(100 * acc/total, acc, total))
 
 
-model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w)
+opts = {'use_ctx': True, 'use_embd': True, 'use_prev': True, 'use_mask': True}
+model = HybridCodeNetwork(len(vocab), args.embd_size, args.hidden_size, len(system_acts), pre_embd_w, **opts)
 if torch.cuda.is_available():
     model.cuda()
 optimizer = torch.optim.Adadelta(filter(lambda p: p.requires_grad, model.parameters()))

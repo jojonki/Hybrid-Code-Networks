@@ -20,15 +20,27 @@ class WordEmbedding(nn.Module):
 
 
 class HybridCodeNetwork(nn.Module):
-    def __init__(self, vocab_size, embd_size, hidden_size, action_size, pre_embd_w=None):
+    def __init__(self, vocab_size, embd_size, hidden_size, action_size, pre_embd_w=None, use_ctx=False, use_embd=False, use_prev=False, use_mask=False):
         super(HybridCodeNetwork, self).__init__()
         self.embd_size = embd_size
         self.hidden_size = hidden_size
-        # lstm_in_dim = embd_size + vocab_size + action_size + 4 # 4 (context size)
-        # lstm_in_dim = embd_size  # 4 (context size)
-        lstm_in_dim = vocab_size# 4 (context size)
         self.embedding = WordEmbedding(vocab_size, embd_size, pre_embd_w)
+
+        lstm_in_dim = vocab_size # default is bow vector
+        if use_ctx: # context feature
+            lstm_in_dim += 4 # n of context
+        if use_embd: # embedding size
+            lstm_in_dim += embd_size
+        if use_prev: # previous action
+            lstm_in_dim += action_size
+        if use_mask: # action filter
+            lstm_in_dim += action_size
         self.lstm = nn.LSTM(lstm_in_dim, hidden_size, batch_first=True)
+        self.use_ctx = use_ctx
+        self.use_embd = use_embd
+        self.use_prev = use_prev
+        self.use_mask = use_mask
+
         self.fc = nn.Linear(hidden_size, action_size)
 
     def forward(self, uttr, context, bow, prev, act_filter):
@@ -41,15 +53,21 @@ class HybridCodeNetwork(nn.Module):
         dlg_len = uttr.size(1)
         sent_len = uttr.size(2)
 
-        embd = self.embedding(uttr.view(bs, -1)) # (bs, dialog_len*sentence_len, embd)
-        embd = embd.view(bs, dlg_len, sent_len, -1) # (bs, dialog_len, sentence_len, embd)
-        embd = torch.mean(embd, 2) # (bs, dialog_len, embd)
-        # x = torch.cat((embd, context, bow, prev), 2) # (bs, dialog_len, embd+context_dim)
-        # x = torch.cat((embd), 2) # (bs, dialog_len, embd+context_dim)
-        # x = embd # (bs, dialog_len, embd+context_dim)
         x = bow # (bs, dialog_len, embd+context_dim)
+        if self.use_ctx:
+            x = torch.cat((x, context), 2)
+        if self.use_embd:
+            embd = self.embedding(uttr.view(bs, -1)) # (bs, dialog_len*sentence_len, embd)
+            embd = embd.view(bs, dlg_len, sent_len, -1) # (bs, dialog_len, sentence_len, embd)
+            embd = torch.mean(embd, 2) # (bs, dialog_len, embd)
+            x = torch.cat((x, embd), 2)
+        if self.use_prev:
+            x = torch.cat((x, prev), 2)
+        if self.use_mask:
+            x = torch.cat((x, act_filter), 2)
         x, (h, c) = self.lstm(x) # (bs, dialog_len, hid), ((1, bs, hid), (1, bs, hid))
         y = self.fc(F.tanh(x)) # (bs, dialog_len, action_size)
         y = F.softmax(y, -1) # (bs, dialog_len, action_size)
-        # y = y * act_filter
+        if self.use_mask:
+            y = y * act_filter
         return y
