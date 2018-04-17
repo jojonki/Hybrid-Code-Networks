@@ -24,6 +24,11 @@ You need to download following data.
 ./data/GoogleNews-vectors-negative300.bin
 ```
 
+- Libraries
+```
+$ pip install tqdm
+```
+
 ## Train & Test
 ```
 $ python train.py --help
