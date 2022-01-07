@@ -1,4 +1,4 @@
-# Hybrid-Code-Networks
+# Hybrid Code Networks (unofficial)
 
 Hybrid Code Networks: practical and efficient end-to-end dialog control with supervised and reinforcement learning  
 Jason D. Williams, Kavosh Asadi, Geoffrey Zweig  
